@@ -4,7 +4,6 @@ import { join } from 'node:path';
 import type {
   BucketPayload,
   MainToUtilityMessage,
-  PomodoroSessionRecord,
   TodayTotals,
   UtilityToMainMessage,
 } from '../shared/storage-protocol';
@@ -12,9 +11,6 @@ import type {
 export type Storage = {
   flushBucket: (payload: BucketPayload) => void;
   queryTotalToday: () => Promise<TodayTotals>;
-  recordPomodoroSession: (record: PomodoroSessionRecord) => void;
-  queryPomodoroStreak: () => Promise<number>;
-  queryPomodoroTodayCount: () => Promise<number>;
   stop: () => void;
 };
 
@@ -85,14 +81,6 @@ export async function startStorage(): Promise<Storage> {
       settlePending(msg.requestId, msg.payload);
       return;
     }
-    if (msg.type === 'queryPomodoroStreakResult') {
-      settlePending(msg.requestId, msg.payload.streak);
-      return;
-    }
-    if (msg.type === 'queryPomodoroTodayCountResult') {
-      settlePending(msg.requestId, msg.payload.count);
-      return;
-    }
     if (msg.type === 'error') {
       rejectPending(msg.requestId, new Error(msg.payload.message));
     }
@@ -133,25 +121,6 @@ export async function startStorage(): Promise<Storage> {
     }));
   }
 
-  function recordPomodoroSession(record: PomodoroSessionRecord): void {
-    if (!alive) return;
-    send({ type: 'recordPomodoroSession', payload: record });
-  }
-
-  function queryPomodoroStreak(): Promise<number> {
-    return rpcQuery<number>((requestId) => ({
-      type: 'queryPomodoroStreak',
-      requestId,
-    }));
-  }
-
-  function queryPomodoroTodayCount(): Promise<number> {
-    return rpcQuery<number>((requestId) => ({
-      type: 'queryPomodoroTodayCount',
-      requestId,
-    }));
-  }
-
   function stop(): void {
     for (const p of pending.values()) {
       clearTimeout(p.timeout);
@@ -167,9 +136,6 @@ export async function startStorage(): Promise<Storage> {
   return {
     flushBucket,
     queryTotalToday,
-    recordPomodoroSession,
-    queryPomodoroStreak,
-    queryPomodoroTodayCount,
     stop,
   };
 }
