@@ -13,8 +13,11 @@ function formatElapsed(startedAt: number): string {
 }
 
 export function App() {
-  const stats = trpc.stats.useQuery(undefined, {
+  const stats = trpc.tracker.stats.useQuery(undefined, {
     refetchInterval: 1000,
+  });
+  const totalToday = trpc.historical.totalToday.useQuery(undefined, {
+    refetchInterval: 5000,
   });
 
   if (stats.isLoading || !stats.data) {
@@ -34,6 +37,7 @@ export function App() {
   }
 
   const data = stats.data;
+  const today = totalToday.data;
 
   return (
     <div className="flex h-full flex-col gap-6 p-8">
@@ -44,21 +48,58 @@ export function App() {
         </span>
       </header>
 
-      <section className="grid grid-cols-2 gap-4">
-        <Card label="鍵盤按下" value={formatNumber(data.keydown)} />
-        <Card label="滑鼠點擊" value={formatNumber(data.mousedown)} />
-        <Card label="滑鼠移動" value={formatNumber(data.mousemove)} unit="次事件" />
-        <Card
-          label="滑鼠移動距離"
-          value={formatNumber(data.mouseDistance)}
-          unit="px"
-        />
-        <Card label="滾輪" value={formatNumber(data.wheel)} />
-        <Card
-          label="當前 App"
-          value={data.activeApp ?? '—'}
-          subtitle={data.activeTitle ?? undefined}
-        />
+      <section>
+        <h2 className="mb-3 text-xs uppercase tracking-wider text-zinc-500">
+          本次工作階段（即時）
+        </h2>
+        <div className="grid grid-cols-2 gap-4">
+          <Card label="鍵盤按下" value={formatNumber(data.keydown)} />
+          <Card label="滑鼠點擊" value={formatNumber(data.mousedown)} />
+          <Card
+            label="滑鼠移動"
+            value={formatNumber(data.mousemove)}
+            unit="次事件"
+          />
+          <Card
+            label="滑鼠移動距離"
+            value={formatNumber(data.mouseDistance)}
+            unit="px"
+          />
+          <Card label="滾輪" value={formatNumber(data.wheel)} />
+          <Card
+            label="當前 App"
+            value={data.activeApp ?? '—'}
+            subtitle={data.activeTitle ?? undefined}
+          />
+        </div>
+      </section>
+
+      <section>
+        <h2 className="mb-3 text-xs uppercase tracking-wider text-zinc-500">
+          今日總計（DB）
+        </h2>
+        <div className="grid grid-cols-2 gap-4">
+          {today ? (
+            <>
+              <Card label="鍵盤" value={formatNumber(today.keydown)} />
+              <Card label="滑鼠點擊" value={formatNumber(today.mousedown)} />
+              <Card
+                label="滑鼠移動"
+                value={formatNumber(today.mousemove)}
+                unit="次事件"
+              />
+              <Card
+                label="滑鼠移動距離"
+                value={formatNumber(today.mouseDistance)}
+                unit="px"
+              />
+            </>
+          ) : (
+            <div className="col-span-2 text-sm text-zinc-500">
+              {totalToday.error ? `錯誤：${totalToday.error.message}` : 'loading…'}
+            </div>
+          )}
+        </div>
       </section>
 
       <footer className="mt-auto text-xs text-zinc-600">

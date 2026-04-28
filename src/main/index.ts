@@ -2,9 +2,11 @@ import { app, BrowserWindow, shell } from 'electron';
 import { createIPCHandler } from 'electron-trpc/main';
 import { join } from 'node:path';
 import { createRouter } from './router';
-import { createTracker } from './tracker';
+import { startStorage, type Storage } from './storage';
+import { createTracker, type Tracker } from './tracker';
 
-const tracker = createTracker();
+let storage: Storage | null = null;
+let tracker: Tracker | null = null;
 let mainWindow: BrowserWindow | null = null;
 
 const ALLOWED_EXTERNAL_SCHEMES = new Set(['https:', 'http:', 'mailto:']);
@@ -19,8 +21,7 @@ function isAllowedExternalUrl(rawUrl: string): boolean {
 }
 
 function isAllowedRendererUrl(rawUrl: string): boolean {
-  // dev：electron-vite renderer 會走 http://localhost:<port>；
-  // prod：file:// 載入打包後的 index.html。其他都拒絕。
+  // dev：electron-vite renderer 走 http://localhost:<port>；prod：file:// 載入打包後 index.html。
   try {
     const u = new URL(rawUrl);
     if (u.protocol === 'file:') return true;
@@ -42,6 +43,9 @@ function focusMainWindow(): void {
 }
 
 function createWindow(): void {
+  if (!tracker || !storage) {
+    throw new Error('createWindow called before storage / tracker ready');
+  }
   mainWindow = new BrowserWindow({
     width: 960,
     height: 640,
@@ -55,7 +59,10 @@ function createWindow(): void {
     },
   });
 
-  createIPCHandler({ router: createRouter(tracker), windows: [mainWindow] });
+  createIPCHandler({
+    router: createRouter(tracker, storage),
+    windows: [mainWindow],
+  });
 
   mainWindow.on('ready-to-show', () => {
     mainWindow?.show();
@@ -91,7 +98,9 @@ if (!app.requestSingleInstanceLock()) {
 } else {
   app.on('second-instance', focusMainWindow);
 
-  void app.whenReady().then(() => {
+  void app.whenReady().then(async () => {
+    storage = await startStorage();
+    tracker = createTracker({}, storage);
     tracker.start();
     createWindow();
 
@@ -105,10 +114,12 @@ if (!app.requestSingleInstanceLock()) {
   });
 
   app.on('before-quit', () => {
-    tracker.stop();
+    tracker?.stop();
+    storage?.stop();
   });
   // before-quit 在某些路徑（強制終止 / 系統登出）不會觸發，will-quit 是雙保險
   app.on('will-quit', () => {
-    tracker.stop();
+    tracker?.stop();
+    storage?.stop();
   });
 }
