@@ -1,3 +1,4 @@
+import { PomodoroCard } from './components/PomodoroCard';
 import { trpc } from './trpc';
 
 type CardItem = {
@@ -26,6 +27,9 @@ export function App() {
   const totalToday = trpc.historical.totalToday.useQuery(undefined, {
     refetchInterval: 5000,
   });
+  const pomodoroStats = trpc.pomodoro.getStats.useQuery(undefined, {
+    refetchInterval: 30_000,
+  });
 
   if (stats.isLoading || !stats.data) {
     return (
@@ -45,6 +49,7 @@ export function App() {
 
   const data = stats.data;
   const today = totalToday.data;
+  const pomo = pomodoroStats.data;
 
   const liveItems: CardItem[] = [
     { label: '鍵盤按下', value: formatNumber(data.keydown) },
@@ -68,6 +73,13 @@ export function App() {
       ]
     : null;
 
+  const pomoItems: CardItem[] | null = pomo
+    ? [
+        { label: '今日完成', value: formatNumber(pomo.todayCompleted), unit: '個 work session' },
+        { label: '當前 streak', value: formatNumber(pomo.currentStreak), unit: '連續日數' },
+      ]
+    : null;
+
   return (
     <div className="flex h-full flex-col gap-6 p-8">
       <header className="flex items-baseline justify-between">
@@ -76,6 +88,21 @@ export function App() {
           已運行 {formatElapsed(data.startedAt)}
         </span>
       </header>
+
+      <section>
+        <h2 className="mb-3 text-xs uppercase tracking-wider text-zinc-500">
+          番茄鐘
+        </h2>
+        <PomodoroCard />
+      </section>
+
+      <Section
+        title="番茄鐘統計"
+        items={pomoItems}
+        emptyText={
+          pomodoroStats.error ? `錯誤：${pomodoroStats.error.message}` : 'loading…'
+        }
+      />
 
       <Section title="本次工作階段（即時）" items={liveItems} />
 

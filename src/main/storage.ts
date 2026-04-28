@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import type {
   BucketPayload,
   MainToUtilityMessage,
+  PomodoroSessionRecord,
   TodayTotals,
   UtilityToMainMessage,
 } from '../shared/storage-protocol';
@@ -11,13 +12,16 @@ import type {
 export type Storage = {
   flushBucket: (payload: BucketPayload) => void;
   queryTotalToday: () => Promise<TodayTotals>;
+  recordPomodoroSession: (record: PomodoroSessionRecord) => void;
+  queryPomodoroStreak: () => Promise<number>;
+  queryPomodoroTodayCount: () => Promise<number>;
   stop: () => void;
 };
 
 const RPC_TIMEOUT_MS = 5000;
 
 type PendingResolver = {
-  resolve: (value: TodayTotals) => void;
+  resolve: (value: unknown) => void;
   reject: (reason: Error) => void;
   timeout: ReturnType<typeof setTimeout>;
 };
@@ -60,21 +64,37 @@ export async function startStorage(): Promise<Storage> {
     pending.clear();
   });
 
+  function settlePending(requestId: string, value: unknown): void {
+    const p = pending.get(requestId);
+    if (!p) return;
+    pending.delete(requestId);
+    clearTimeout(p.timeout);
+    p.resolve(value);
+  }
+
+  function rejectPending(requestId: string, err: Error): void {
+    const p = pending.get(requestId);
+    if (!p) return;
+    pending.delete(requestId);
+    clearTimeout(p.timeout);
+    p.reject(err);
+  }
+
   child.on('message', (msg: UtilityToMainMessage) => {
     if (msg.type === 'queryTotalTodayResult') {
-      const p = pending.get(msg.requestId);
-      if (!p) return;
-      pending.delete(msg.requestId);
-      clearTimeout(p.timeout);
-      p.resolve(msg.payload);
+      settlePending(msg.requestId, msg.payload);
+      return;
+    }
+    if (msg.type === 'queryPomodoroStreakResult') {
+      settlePending(msg.requestId, msg.payload.streak);
+      return;
+    }
+    if (msg.type === 'queryPomodoroTodayCountResult') {
+      settlePending(msg.requestId, msg.payload.count);
       return;
     }
     if (msg.type === 'error') {
-      const p = pending.get(msg.requestId);
-      if (!p) return;
-      pending.delete(msg.requestId);
-      clearTimeout(p.timeout);
-      p.reject(new Error(msg.payload.message));
+      rejectPending(msg.requestId, new Error(msg.payload.message));
     }
   });
 
@@ -82,22 +102,54 @@ export async function startStorage(): Promise<Storage> {
     child.postMessage(msg);
   }
 
+  function rpcQuery<T>(
+    makeMessage: (requestId: string) => MainToUtilityMessage,
+  ): Promise<T> {
+    if (!alive) return Promise.reject(new Error('storage: utility process is dead'));
+    const requestId = randomUUID();
+    return new Promise<T>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        pending.delete(requestId);
+        reject(new Error('rpc query timed out'));
+      }, RPC_TIMEOUT_MS);
+      pending.set(requestId, {
+        resolve: resolve as (value: unknown) => void,
+        reject,
+        timeout,
+      });
+      send(makeMessage(requestId));
+    });
+  }
+
   function flushBucket(payload: BucketPayload): void {
-    if (!alive) return; // utility 已死，靜默丟棄；下次重啟 app 時資料從 in-memory 重新累計
+    if (!alive) return;
     send({ type: 'bucket', payload });
   }
 
   function queryTotalToday(): Promise<TodayTotals> {
-    if (!alive) return Promise.reject(new Error('storage: utility process is dead'));
-    const requestId = randomUUID();
-    return new Promise<TodayTotals>((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        pending.delete(requestId);
-        reject(new Error('queryTotalToday timed out'));
-      }, RPC_TIMEOUT_MS);
-      pending.set(requestId, { resolve, reject, timeout });
-      send({ type: 'queryTotalToday', requestId });
-    });
+    return rpcQuery<TodayTotals>((requestId) => ({
+      type: 'queryTotalToday',
+      requestId,
+    }));
+  }
+
+  function recordPomodoroSession(record: PomodoroSessionRecord): void {
+    if (!alive) return;
+    send({ type: 'recordPomodoroSession', payload: record });
+  }
+
+  function queryPomodoroStreak(): Promise<number> {
+    return rpcQuery<number>((requestId) => ({
+      type: 'queryPomodoroStreak',
+      requestId,
+    }));
+  }
+
+  function queryPomodoroTodayCount(): Promise<number> {
+    return rpcQuery<number>((requestId) => ({
+      type: 'queryPomodoroTodayCount',
+      requestId,
+    }));
   }
 
   function stop(): void {
@@ -112,5 +164,12 @@ export async function startStorage(): Promise<Storage> {
     }
   }
 
-  return { flushBucket, queryTotalToday, stop };
+  return {
+    flushBucket,
+    queryTotalToday,
+    recordPomodoroSession,
+    queryPomodoroStreak,
+    queryPomodoroTodayCount,
+    stop,
+  };
 }

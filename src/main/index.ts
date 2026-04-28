@@ -1,12 +1,20 @@
 import { app, BrowserWindow, shell } from 'electron';
 import { createIPCHandler } from 'electron-trpc/main';
 import { join } from 'node:path';
+import {
+  createPomodoro,
+  DEFAULT_POMODORO_SETTINGS,
+  validatePomodoroSettings,
+  type Pomodoro,
+} from './pomodoro';
 import { createRouter } from './router';
+import { createSettingsStore } from './settings-store';
 import { startStorage, type Storage } from './storage';
 import { createTracker, type Tracker } from './tracker';
 
 let storage: Storage | null = null;
 let tracker: Tracker | null = null;
+let pomodoro: Pomodoro | null = null;
 let mainWindow: BrowserWindow | null = null;
 
 const ALLOWED_EXTERNAL_SCHEMES = new Set(['https:', 'http:', 'mailto:']);
@@ -43,12 +51,12 @@ function focusMainWindow(): void {
 }
 
 function createWindow(): void {
-  if (!tracker || !storage) {
-    throw new Error('createWindow called before storage / tracker ready');
+  if (!tracker || !storage || !pomodoro) {
+    throw new Error('createWindow called before storage / tracker / pomodoro ready');
   }
   mainWindow = new BrowserWindow({
     width: 960,
-    height: 640,
+    height: 720,
     show: false,
     autoHideMenuBar: true,
     webPreferences: {
@@ -60,7 +68,7 @@ function createWindow(): void {
   });
 
   createIPCHandler({
-    router: createRouter(tracker, storage),
+    router: createRouter(tracker, storage, pomodoro),
     windows: [mainWindow],
   });
 
@@ -102,6 +110,18 @@ if (!app.requestSingleInstanceLock()) {
     storage = await startStorage();
     tracker = createTracker({}, storage);
     tracker.start();
+
+    const pomodoroSettings = createSettingsStore(
+      'pomodoro-settings.json',
+      DEFAULT_POMODORO_SETTINGS,
+      validatePomodoroSettings,
+    );
+    pomodoro = createPomodoro({
+      storage,
+      settingsStore: pomodoroSettings,
+      onNotificationClick: focusMainWindow,
+    });
+
     createWindow();
 
     app.on('activate', () => {
@@ -114,11 +134,13 @@ if (!app.requestSingleInstanceLock()) {
   });
 
   app.on('before-quit', () => {
+    pomodoro?.stop();
     tracker?.stop();
     storage?.stop();
   });
   // before-quit 在某些路徑（強制終止 / 系統登出）不會觸發，will-quit 是雙保險
   app.on('will-quit', () => {
+    pomodoro?.stop();
     tracker?.stop();
     storage?.stop();
   });
