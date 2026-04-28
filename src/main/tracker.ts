@@ -34,6 +34,14 @@ function emptyDelta(): AppDelta {
   return { keydown: 0, mousedown: 0, mousemove: 0, wheel: 0, mouseDistance: 0 };
 }
 
+function addDelta(into: AppDelta, from: AppDelta): void {
+  into.keydown += from.keydown;
+  into.mousedown += from.mousedown;
+  into.mousemove += from.mousemove;
+  into.wheel += from.wheel;
+  into.mouseDistance += from.mouseDistance;
+}
+
 export function createTracker(
   options: TrackerOptions = {},
   storage?: Pick<Storage, 'flushBucket'>,
@@ -41,31 +49,25 @@ export function createTracker(
   const captureTitle = options.captureTitle ?? false;
   const blacklist = new Set(options.appBlacklist ?? []);
 
-  const stats: Stats = {
-    startedAt: 0,
-    keydown: 0,
-    mousedown: 0,
-    mousemove: 0,
-    wheel: 0,
-    mouseDistance: 0,
-    activeApp: null,
-    activeTitle: null,
-  };
+  // 已 flush 過的累計 + 還在 pending 的，是 live stats 的單一來源；活窗 / 標題另外維護
+  const sessionTotals: AppDelta = emptyDelta();
   const pendingDeltas = new Map<string, AppDelta>();
+  let activeApp: string | null = null;
+  let activeTitle: string | null = null;
+  let startedAt = 0;
   let pollTimer: ReturnType<typeof setInterval> | null = null;
   let flushTimer: ReturnType<typeof setInterval> | null = null;
   let started = false;
   let pollErrorReported = false;
 
-  function recordPerApp(field: keyof AppDelta, by: number): void {
-    const app = stats.activeApp;
-    if (!app) return; // null = blacklisted 或尚未 poll；故意不寫進 DB
-    let delta = pendingDeltas.get(app);
+  function getOrCreateDelta(): AppDelta | null {
+    if (!activeApp) return null; // null = blacklisted 或尚未 poll，事件整顆丟掉（隱私 + 一致性）
+    let delta = pendingDeltas.get(activeApp);
     if (!delta) {
       delta = emptyDelta();
-      pendingDeltas.set(app, delta);
+      pendingDeltas.set(activeApp, delta);
     }
-    delta[field] += by;
+    return delta;
   }
 
   async function pollActiveWindow(): Promise<void> {
@@ -73,12 +75,12 @@ export function createTracker(
       const win = await activeWindow();
       const appName = win?.owner?.name ?? null;
       if (appName && blacklist.has(appName)) {
-        stats.activeApp = null;
-        stats.activeTitle = null;
+        activeApp = null;
+        activeTitle = null;
         return;
       }
-      stats.activeApp = appName;
-      stats.activeTitle = captureTitle ? (win?.title ?? null) : null;
+      activeApp = appName;
+      activeTitle = captureTitle ? (win?.title ?? null) : null;
     } catch (err) {
       if (!pollErrorReported) {
         pollErrorReported = true;
@@ -91,44 +93,52 @@ export function createTracker(
   }
 
   function flush(): void {
-    if (!storage || pendingDeltas.size === 0) return;
-    const perApp: Record<string, AppDelta> = {};
-    for (const [app, delta] of pendingDeltas) {
-      perApp[app] = { ...delta };
+    if (pendingDeltas.size === 0) return;
+    if (storage) {
+      const perApp: Record<string, AppDelta> = {};
+      for (const [app, delta] of pendingDeltas) {
+        perApp[app] = delta;
+        addDelta(sessionTotals, delta);
+      }
+      storage.flushBucket({
+        minuteTs: Math.floor(Date.now() / 60_000),
+        perApp,
+      });
+    } else {
+      // 沒接 storage（測試 / 無持久化模式）也要把累計併進去，避免 live stats 歸零
+      for (const delta of pendingDeltas.values()) {
+        addDelta(sessionTotals, delta);
+      }
     }
     pendingDeltas.clear();
-    storage.flushBucket({
-      minuteTs: Math.floor(Date.now() / 60_000),
-      perApp,
-    });
   }
 
   function start(): void {
     if (started) return;
-    stats.startedAt = Date.now();
+    startedAt = Date.now();
 
     try {
       startHooks({
         onKey: () => {
-          stats.keydown++;
-          recordPerApp('keydown', 1);
+          const d = getOrCreateDelta();
+          if (d) d.keydown++;
         },
         onMouseClick: () => {
-          stats.mousedown++;
-          recordPerApp('mousedown', 1);
+          const d = getOrCreateDelta();
+          if (d) d.mousedown++;
         },
         onMouseMove: ({ dx, dy }) => {
-          stats.mousemove++;
+          const d = getOrCreateDelta();
+          if (!d) return;
+          d.mousemove++;
           const distance = Math.sqrt(dx * dx + dy * dy);
           if (distance < MAX_MOUSE_DELTA_PX) {
-            stats.mouseDistance += distance;
-            recordPerApp('mousemove', 1);
-            recordPerApp('mouseDistance', distance);
+            d.mouseDistance += distance;
           }
         },
         onWheel: () => {
-          stats.wheel++;
-          recordPerApp('wheel', 1);
+          const d = getOrCreateDelta();
+          if (d) d.wheel++;
         },
       });
     } catch (err) {
@@ -142,9 +152,7 @@ export function createTracker(
     }, ACTIVE_WINDOW_POLL_MS);
     void pollActiveWindow();
 
-    if (storage) {
-      flushTimer = setInterval(flush, FLUSH_INTERVAL_MS);
-    }
+    flushTimer = setInterval(flush, FLUSH_INTERVAL_MS);
   }
 
   function stop(): void {
@@ -159,11 +167,24 @@ export function createTracker(
       clearInterval(flushTimer);
       flushTimer = null;
     }
-    flush(); // 退出前最後一次落盤
+    flush();
   }
 
   function getStats(): Stats {
-    return stats;
+    const totals: AppDelta = { ...sessionTotals };
+    for (const delta of pendingDeltas.values()) {
+      addDelta(totals, delta);
+    }
+    return {
+      startedAt,
+      keydown: totals.keydown,
+      mousedown: totals.mousedown,
+      mousemove: totals.mousemove,
+      wheel: totals.wheel,
+      mouseDistance: totals.mouseDistance,
+      activeApp,
+      activeTitle,
+    };
   }
 
   return { start, stop, getStats };

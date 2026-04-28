@@ -1,46 +1,9 @@
-/**
- * Utility process：背景 SQLite 寫入 + 聚合查詢。
- *
- * 透過 Electron utilityProcess 由 main spawn。與 main 走 `process.parentPort` 訊息通道
- * （Electron 33+ 標配）。所有訊息採 `{ type, requestId?, payload }` 結構，
- * main 端維護 requestId → resolver 的 Map 做 RPC。
- *
- * 隱私底線（同 hooks.ts）：本檔不會寫任何按鍵內容、按鍵時序、按鍵字元。
- * 只儲存「分鐘 bucket × 應用程式 × 計數」聚合。
- */
-
 import Database from 'better-sqlite3';
-
-type AppDelta = {
-  keydown: number;
-  mousedown: number;
-  mousemove: number;
-  wheel: number;
-  mouseDistance: number;
-};
-
-type BucketMessage = {
-  type: 'bucket';
-  payload: {
-    minuteTs: number;
-    perApp: Record<string, AppDelta>;
-  };
-};
-
-type QueryTotalTodayMessage = {
-  type: 'queryTotalToday';
-  requestId: string;
-};
-
-type IncomingMessage = BucketMessage | QueryTotalTodayMessage;
-
-type TotalRow = {
-  keydown: number;
-  mousedown: number;
-  mousemove: number;
-  wheel: number;
-  mouseDistance: number;
-};
+import type {
+  AppDelta,
+  MainToUtilityMessage,
+  TodayTotals,
+} from '../shared/storage-protocol';
 
 const dbPath = process.env['KEYTRACE_DB_PATH'];
 if (!dbPath) {
@@ -76,11 +39,9 @@ const upsertBucket = db.prepare(`
     mouse_distance = mouse_distance + excluded.mouse_distance
 `);
 
-const writeBucket = db.transaction(
+const applyBucket = db.transaction(
   (minuteTs: number, perApp: Record<string, AppDelta>) => {
-    for (const appName in perApp) {
-      const delta = perApp[appName];
-      if (!delta) continue;
+    for (const [appName, delta] of Object.entries(perApp)) {
       upsertBucket.run({
         minuteTs,
         appName,
@@ -111,24 +72,35 @@ function startOfTodayMinuteTs(): number {
   return Math.floor(now.getTime() / 60_000);
 }
 
+function readTodayTotals(): TodayTotals {
+  const row = totalSinceStmt.get(startOfTodayMinuteTs()) as Record<string, unknown>;
+  // 顯式 normalize 避免 schema migration 後 row 形狀不對讓 renderer 拿到 NaN / null
+  return {
+    keydown: Number(row['keydown'] ?? 0),
+    mousedown: Number(row['mousedown'] ?? 0),
+    mousemove: Number(row['mousemove'] ?? 0),
+    wheel: Number(row['wheel'] ?? 0),
+    mouseDistance: Number(row['mouseDistance'] ?? 0),
+  };
+}
+
 const parentPort = process.parentPort;
 if (!parentPort) {
   throw new Error('process.parentPort missing — utility must be spawned via Electron utilityProcess');
 }
 
 parentPort.on('message', (event) => {
-  const msg = event.data as IncomingMessage;
+  const msg = event.data as MainToUtilityMessage;
   try {
     if (msg.type === 'bucket') {
-      writeBucket(msg.payload.minuteTs, msg.payload.perApp);
+      applyBucket(msg.payload.minuteTs, msg.payload.perApp);
       return;
     }
     if (msg.type === 'queryTotalToday') {
-      const row = totalSinceStmt.get(startOfTodayMinuteTs()) as TotalRow;
       parentPort.postMessage({
         type: 'queryTotalTodayResult',
         requestId: msg.requestId,
-        payload: row,
+        payload: readTodayTotals(),
       });
       return;
     }

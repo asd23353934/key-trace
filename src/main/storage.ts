@@ -1,34 +1,31 @@
-/**
- * main 端 storage 橋：spawn utility process、維護 requestId → resolver 的 RPC、
- * 對 main 內部其他模組（tracker / router）暴露 flushBucket / queryTotalToday。
- */
-
 import { app, utilityProcess, type UtilityProcess } from 'electron';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import type {
   BucketPayload,
   MainToUtilityMessage,
-  TotalsRow,
+  TodayTotals,
   UtilityToMainMessage,
 } from '../shared/storage-protocol';
 
 export type Storage = {
   flushBucket: (payload: BucketPayload) => void;
-  queryTotalToday: () => Promise<TotalsRow>;
+  queryTotalToday: () => Promise<TodayTotals>;
   stop: () => void;
 };
 
 const RPC_TIMEOUT_MS = 5000;
 
 type PendingResolver = {
-  resolve: (value: TotalsRow) => void;
+  resolve: (value: TodayTotals) => void;
   reject: (reason: Error) => void;
   timeout: ReturnType<typeof setTimeout>;
 };
 
 export async function startStorage(): Promise<Storage> {
   const dbPath = join(app.getPath('userData'), 'key-trace.db');
+  // utility entry 由 electron-vite 的 main rollupOptions.input 一起 build 到 out/main/，
+  // 與本檔的 out/main/index.js 同目錄。重構時不要把 src/utility 移出此 build group。
   const utilityModulePath = join(__dirname, 'utility.js');
 
   const child: UtilityProcess = utilityProcess.fork(utilityModulePath, [], {
@@ -37,18 +34,30 @@ export async function startStorage(): Promise<Storage> {
   });
 
   const pending = new Map<string, PendingResolver>();
+  let alive = false;
 
   await new Promise<void>((resolve, reject) => {
     const onReady = (msg: UtilityToMainMessage) => {
       if (msg.type === 'ready') {
         child.off('message', onReady);
+        alive = true;
         resolve();
       }
     };
     child.on('message', onReady);
     child.once('exit', (code) => {
-      reject(new Error(`utility exited before ready (code=${code})`));
+      if (!alive) reject(new Error(`utility exited before ready (code=${code})`));
     });
+  });
+
+  child.on('exit', (code) => {
+    alive = false;
+    console.error(`[storage] utility exited unexpectedly (code=${code})`);
+    for (const p of pending.values()) {
+      clearTimeout(p.timeout);
+      p.reject(new Error(`utility exited (code=${code})`));
+    }
+    pending.clear();
   });
 
   child.on('message', (msg: UtilityToMainMessage) => {
@@ -74,12 +83,14 @@ export async function startStorage(): Promise<Storage> {
   }
 
   function flushBucket(payload: BucketPayload): void {
+    if (!alive) return; // utility 已死，靜默丟棄；下次重啟 app 時資料從 in-memory 重新累計
     send({ type: 'bucket', payload });
   }
 
-  function queryTotalToday(): Promise<TotalsRow> {
+  function queryTotalToday(): Promise<TodayTotals> {
+    if (!alive) return Promise.reject(new Error('storage: utility process is dead'));
     const requestId = randomUUID();
-    return new Promise<TotalsRow>((resolve, reject) => {
+    return new Promise<TodayTotals>((resolve, reject) => {
       const timeout = setTimeout(() => {
         pending.delete(requestId);
         reject(new Error('queryTotalToday timed out'));
@@ -95,7 +106,10 @@ export async function startStorage(): Promise<Storage> {
       p.reject(new Error('storage stopped'));
     }
     pending.clear();
-    child.kill();
+    if (alive) {
+      alive = false;
+      child.kill();
+    }
   }
 
   return { flushBucket, queryTotalToday, stop };

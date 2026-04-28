@@ -150,8 +150,8 @@ _尚未建立 `package.json`。完成 scaffold 後在此填入實際版本號，
 
 - **README**：給人類看的「如何 npm run dev / macOS 權限引導 / 隱私聲明摘要」。CLAUDE.md 第 36 行的隱私底線目前只在 spec + code 結構強制，使用者面要在 README 補一份摘要
 - **`tsconfig.config.json` 拆分**：目前 `tsconfig.node.json` 同時涵蓋 `electron.vite.config.ts`（Node API）與 `src/main` / `src/preload`（Electron runtime），日後加 Electron-only 型別時會打架，拆 config 出來
-- **router namespace**：第二個 router 進場前，`createRouter` 內把 `stats` 改放 `tracker.stats` namespace，避免命名平展
-- **createTracker DI for tests**：第一次寫單元測試時加 `hooks` injectable 參數（或於 vitest setup 用 `vi.mock('uiohook-napi')`，二擇一）
+- **createTracker hooks DI**：tracker 已支援注入 `storage` 做測試（A2 落地時順手做了），但 hooks layer 仍是直接 import `./hooks`。第一次寫 unit test 時加 `hooks` 注入參數，或於 vitest setup 用 `vi.mock('uiohook-napi')`，二擇一
+- **utility entry 拆 pure factory + bootstrap**：`src/utility/index.ts` 目前是 side-effect script（module load 就開 DB、listen parentPort），無法 unit test。重構成 `createUtilityHandler({ db, port })` + 一個 thin bootstrap 檔，讓核心邏輯可注入 mock DB 測試
 - **`.vscode/extensions.json`**：寫 Tailwind / TS / ESLint / Prettier 推薦延伸（目前 `.gitignore` 已預留例外但檔案未生）
 - **Stats payload 體積**：renderer 每 1 秒 IPC 拉完整 Stats，數字大 / 加 per-app-per-keycode map 後浪費。改 main 端 dirty-flag 或拉長到 2~3 秒
 - **render churn**：dashboard 開始放 chart 時，`<Card>` 加 `React.memo` + `getStats` 加結構共享判斷

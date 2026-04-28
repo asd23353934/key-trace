@@ -1,5 +1,12 @@
 import { trpc } from './trpc';
 
+type CardItem = {
+  label: string;
+  value: string;
+  unit?: string | undefined;
+  subtitle?: string | undefined;
+};
+
 function formatNumber(n: number): string {
   return new Intl.NumberFormat('zh-Hant').format(Math.round(n));
 }
@@ -39,6 +46,28 @@ export function App() {
   const data = stats.data;
   const today = totalToday.data;
 
+  const liveItems: CardItem[] = [
+    { label: '鍵盤按下', value: formatNumber(data.keydown) },
+    { label: '滑鼠點擊', value: formatNumber(data.mousedown) },
+    { label: '滑鼠移動', value: formatNumber(data.mousemove), unit: '次事件' },
+    { label: '滑鼠移動距離', value: formatNumber(data.mouseDistance), unit: 'px' },
+    { label: '滾輪', value: formatNumber(data.wheel) },
+    {
+      label: '當前 App',
+      value: data.activeApp ?? '—',
+      subtitle: data.activeTitle ?? undefined,
+    },
+  ];
+
+  const todayItems: CardItem[] | null = today
+    ? [
+        { label: '鍵盤', value: formatNumber(today.keydown) },
+        { label: '滑鼠點擊', value: formatNumber(today.mousedown) },
+        { label: '滑鼠移動', value: formatNumber(today.mousemove), unit: '次事件' },
+        { label: '滑鼠移動距離', value: formatNumber(today.mouseDistance), unit: 'px' },
+      ]
+    : null;
+
   return (
     <div className="flex h-full flex-col gap-6 p-8">
       <header className="flex items-baseline justify-between">
@@ -48,59 +77,15 @@ export function App() {
         </span>
       </header>
 
-      <section>
-        <h2 className="mb-3 text-xs uppercase tracking-wider text-zinc-500">
-          本次工作階段（即時）
-        </h2>
-        <div className="grid grid-cols-2 gap-4">
-          <Card label="鍵盤按下" value={formatNumber(data.keydown)} />
-          <Card label="滑鼠點擊" value={formatNumber(data.mousedown)} />
-          <Card
-            label="滑鼠移動"
-            value={formatNumber(data.mousemove)}
-            unit="次事件"
-          />
-          <Card
-            label="滑鼠移動距離"
-            value={formatNumber(data.mouseDistance)}
-            unit="px"
-          />
-          <Card label="滾輪" value={formatNumber(data.wheel)} />
-          <Card
-            label="當前 App"
-            value={data.activeApp ?? '—'}
-            subtitle={data.activeTitle ?? undefined}
-          />
-        </div>
-      </section>
+      <Section title="本次工作階段（即時）" items={liveItems} />
 
-      <section>
-        <h2 className="mb-3 text-xs uppercase tracking-wider text-zinc-500">
-          今日總計（DB）
-        </h2>
-        <div className="grid grid-cols-2 gap-4">
-          {today ? (
-            <>
-              <Card label="鍵盤" value={formatNumber(today.keydown)} />
-              <Card label="滑鼠點擊" value={formatNumber(today.mousedown)} />
-              <Card
-                label="滑鼠移動"
-                value={formatNumber(today.mousemove)}
-                unit="次事件"
-              />
-              <Card
-                label="滑鼠移動距離"
-                value={formatNumber(today.mouseDistance)}
-                unit="px"
-              />
-            </>
-          ) : (
-            <div className="col-span-2 text-sm text-zinc-500">
-              {totalToday.error ? `錯誤：${totalToday.error.message}` : 'loading…'}
-            </div>
-          )}
-        </div>
-      </section>
+      <Section
+        title="今日總計（DB）"
+        items={todayItems}
+        emptyText={
+          totalToday.error ? `錯誤：${totalToday.error.message}` : 'loading…'
+        }
+      />
 
       <footer className="mt-auto text-xs text-zinc-600">
         walking skeleton · 按鍵內容永不記錄，僅累計次數
@@ -109,17 +94,34 @@ export function App() {
   );
 }
 
-function Card({
-  label,
-  value,
-  unit,
-  subtitle,
+function Section({
+  title,
+  items,
+  emptyText,
 }: {
-  label: string;
-  value: string;
-  unit?: string | undefined;
-  subtitle?: string | undefined;
+  title: string;
+  items: CardItem[] | null;
+  emptyText?: string;
 }) {
+  return (
+    <section>
+      <h2 className="mb-3 text-xs uppercase tracking-wider text-zinc-500">
+        {title}
+      </h2>
+      {items ? (
+        <div className="grid grid-cols-2 gap-4">
+          {items.map((item) => (
+            <Card key={item.label} {...item} />
+          ))}
+        </div>
+      ) : (
+        <div className="text-sm text-zinc-500">{emptyText ?? ''}</div>
+      )}
+    </section>
+  );
+}
+
+function Card({ label, value, unit, subtitle }: CardItem) {
   return (
     <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-4">
       <div className="text-xs text-zinc-500">{label}</div>
