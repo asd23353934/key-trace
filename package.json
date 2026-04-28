@@ -1,0 +1,43 @@
+{
+  "name": "key-trace",
+  "version": "0.0.1",
+  "description": "WhatPulse 替代品：應用程式使用時長與鍵鼠次數追蹤",
+  "private": true,
+  "main": "./out/main/index.js",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "preview": "electron-vite preview",
+    "typecheck:node": "tsc --noEmit -p tsconfig.node.json --composite false",
+    "typecheck:web": "tsc --noEmit -p tsconfig.web.json --composite false",
+    "typecheck": "npm run typecheck:node && npm run typecheck:web",
+    "e2e:smoke": "node scripts/e2e-check.mjs"
+  },
+  "dependencies": {
+    "@tanstack/react-query": "4.44.0",
+    "@trpc/client": "10.45.4",
+    "@trpc/react-query": "10.45.4",
+    "@trpc/server": "10.45.4",
+    "electron-trpc": "0.7.1",
+    "get-windows": "9.3.0",
+    "react": "19.2.5",
+    "react-dom": "19.2.5",
+    "uiohook-napi": "1.5.5"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "4.2.4",
+    "@types/node": "25.6.0",
+    "@types/react": "19.2.14",
+    "@types/react-dom": "19.2.3",
+    "@vitejs/plugin-react": "5.2.0",
+    "electron": "41.3.0",
+    "electron-vite": "5.0.0",
+    "playwright": "1.59.1",
+    "tailwindcss": "4.2.4",
+    "typescript": "6.0.3",
+    "vite": "7.3.2"
+  }
+}

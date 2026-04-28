@@ -1,0 +1,15 @@
+node_modules
+out
+dist
+release
+.env
+.env.local
+*.log
+.DS_Store
+Thumbs.db
+.vscode/*
+!.vscode/extensions.json
+.idea
+tmp-*.png
+.claude/settings.local.json
+.claude/cache/
