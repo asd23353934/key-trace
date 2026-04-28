@@ -1,0 +1,41 @@
+schema: spec-driven
+
+context: |
+  key-trace 是 WhatPulse 替代品（桌面 app），記錄應用程式使用時長 + 鍵鼠次數
+  並產報表。三軸差異化：精準專注時間 / 漂亮 dashboard / 任務 tagging + 番茄鐘。
+
+  Tech stack（鎖版理由請查 `~/Desktop/gitlab/hsin-dev-notes/electron/stack.md`）：
+  - Electron 41 + electron-vite 5 + Vite 7.3.2
+  - React 19 + TypeScript strict + Tailwind v4 + shadcn/ui + Tremor + Recharts
+  - Zustand（renderer state）+ TanStack Query v4（IPC 資料層）
+  - electron-trpc 0.7.1 + tRPC v10（鎖在 v10：electron-trpc 還沒升 v11）
+  - better-sqlite3 12.9（直接 prebuilt 載入，不 rebuild）
+  - uiohook-napi（鍵鼠 hook，包 wrapper）+ get-windows（視窗偵測，5s 輪詢）
+
+  進程：main（hook + 視窗 + tray + tRPC handler）/ utility（SQLite 寫入 + 聚合
+  + 未來 Claude API）/ renderer（UI）。main↔utility 走 utilityProcess.fork +
+  parentPort 自寫 RPC（requestId UUID + Map + 5s timeout + crash 恢復 alive
+  flag）；renderer↔main 走 electron-trpc。
+
+  Schema：events(minute_ts, app_name) PK + 5 個計數欄位（keydown / mousedown /
+  mousemove / wheel / mouse_distance）upsert 累加。每分鐘 flush，未來再加
+  daily_app_stats rollup。
+
+  **隱私底線（不可動搖，PR 必擋）**：只記每鍵 × 每 app 累計次數，永不記按鍵
+  內容、按鍵時序、按鍵字元。視窗標題預設 OFF。密碼類 app 黑名單。鍵鼠 hook
+  必經 src/main/hooks.ts 隱私 wrapper，只暴露 keycode / 相對位移 / 計數信號。
+
+  v1 範圍：番茄鐘 + 專注 streak、heatmap + 一日週期分析、每日 markdown 報告、
+  Claude API 寫每日總結。v2 之後：AI 分類 / 專案 tagging / E2EE 雲同步等。
+
+rules:
+  proposal:
+    - 用繁體中文，結論先（why first），自然段落為主
+    - 對齊既有架構決議（main / utility / renderer 三進程 + 隱私底線），不為假想需求設計
+    - 影響 schema / 隱私底線 / 三進程邊界要明確標注
+  tasks:
+    - 每個 task 對應實際 file path 與動作（建檔 / 改動 / 測試）
+    - 自然把「驗證步驟」（typecheck / build / Playwright e2e）寫成最後幾個 task
+  spec:
+    - capability 名稱用名詞短語（tracker / storage / dashboard），不用動詞
+    - 例外 / edge case 一律寫進 spec，不留給讀者推

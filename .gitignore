@@ -13,3 +13,5 @@ Thumbs.db
 tmp-*.png
 .claude/settings.local.json
 .claude/cache/
+.spectra/
+openspec/.vector-search.db*
