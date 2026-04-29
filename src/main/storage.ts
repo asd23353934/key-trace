@@ -3,6 +3,8 @@ import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import type {
   BucketPayload,
+  HeatmapDailyRow,
+  HourlyDistributionRow,
   MainToUtilityMessage,
   TodayTotals,
   UtilityToMainMessage,
@@ -11,6 +13,8 @@ import type {
 export type Storage = {
   flushBucket: (payload: BucketPayload) => void;
   queryTotalToday: () => Promise<TodayTotals>;
+  queryHeatmapDaily: (weeks: number) => Promise<HeatmapDailyRow[]>;
+  queryHourlyDistribution: (days: number) => Promise<HourlyDistributionRow[]>;
   stop: () => void;
 };
 
@@ -77,12 +81,12 @@ export async function startStorage(): Promise<Storage> {
   }
 
   child.on('message', (msg: UtilityToMainMessage) => {
-    if (msg.type === 'queryTotalTodayResult') {
-      settlePending(msg.requestId, msg.payload);
-      return;
-    }
     if (msg.type === 'error') {
       rejectPending(msg.requestId, new Error(msg.payload.message));
+      return;
+    }
+    if (msg.type !== 'ready') {
+      settlePending(msg.requestId, msg.payload);
     }
   });
 
@@ -121,6 +125,22 @@ export async function startStorage(): Promise<Storage> {
     }));
   }
 
+  function queryHeatmapDaily(weeks: number): Promise<HeatmapDailyRow[]> {
+    return rpcQuery<HeatmapDailyRow[]>((requestId) => ({
+      type: 'queryHeatmapDaily',
+      requestId,
+      payload: { weeks },
+    }));
+  }
+
+  function queryHourlyDistribution(days: number): Promise<HourlyDistributionRow[]> {
+    return rpcQuery<HourlyDistributionRow[]>((requestId) => ({
+      type: 'queryHourlyDistribution',
+      requestId,
+      payload: { days },
+    }));
+  }
+
   function stop(): void {
     for (const p of pending.values()) {
       clearTimeout(p.timeout);
@@ -136,6 +156,8 @@ export async function startStorage(): Promise<Storage> {
   return {
     flushBucket,
     queryTotalToday,
+    queryHeatmapDaily,
+    queryHourlyDistribution,
     stop,
   };
 }
