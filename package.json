@@ -26,7 +26,8 @@
     "get-windows": "9.3.0",
     "react": "19.2.5",
     "react-dom": "19.2.5",
-    "uiohook-napi": "1.5.5"
+    "uiohook-napi": "1.5.5",
+    "zod": "3.25.76"
   },
   "devDependencies": {
     "@electron/rebuild": "4.0.4",
