@@ -1,6 +1,8 @@
 import Database from 'better-sqlite3';
 import type {
   AppDelta,
+  HeatmapDailyRow,
+  HourlyDistributionRow,
   MainToUtilityMessage,
   TodayTotals,
 } from '../shared/storage-protocol';
@@ -66,10 +68,37 @@ const totalSinceStmt = db.prepare(`
   WHERE minute_ts >= ?
 `);
 
+const heatmapDailyStmt = db.prepare(`
+  SELECT
+    date(minute_ts * 60, 'unixepoch', 'localtime') AS day,
+    SUM(keydown + mousedown) AS count
+  FROM events
+  WHERE minute_ts >= ?
+  GROUP BY day
+  ORDER BY day
+`);
+
+const hourlyDistributionStmt = db.prepare(`
+  SELECT
+    CAST(strftime('%H', datetime(minute_ts * 60, 'unixepoch', 'localtime')) AS INTEGER) AS hour,
+    SUM(keydown + mousedown) AS count
+  FROM events
+  WHERE minute_ts >= ?
+  GROUP BY hour
+  ORDER BY hour
+`);
+
 function startOfTodayMinuteTs(): number {
   const now = new Date();
   now.setHours(0, 0, 0, 0);
   return Math.floor(now.getTime() / 60_000);
+}
+
+function minuteTsDaysAgo(days: number): number {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  d.setDate(d.getDate() - days);
+  return Math.floor(d.getTime() / 60_000);
 }
 
 function readTodayTotals(): TodayTotals {
@@ -81,6 +110,25 @@ function readTodayTotals(): TodayTotals {
     wheel: Number(row['wheel'] ?? 0),
     mouseDistance: Number(row['mouseDistance'] ?? 0),
   };
+}
+
+function readHeatmapDaily(weeks: number): HeatmapDailyRow[] {
+  const since = minuteTsDaysAgo(weeks * 7 - 1);
+  const rows = heatmapDailyStmt.all(since) as { day: string; count: number | null }[];
+  return rows.map((r) => ({ date: r.day, count: Number(r.count ?? 0) }));
+}
+
+function readHourlyDistribution(days: number): HourlyDistributionRow[] {
+  const since = minuteTsDaysAgo(days - 1);
+  const rows = hourlyDistributionStmt.all(since) as { hour: number; count: number | null }[];
+  // SQL 可能少於 24 列；填補成 0..23 都有的完整 array
+  const byHour = new Map<number, number>();
+  for (const r of rows) byHour.set(Number(r.hour), Number(r.count ?? 0));
+  const result: HourlyDistributionRow[] = [];
+  for (let h = 0; h < 24; h++) {
+    result.push({ hour: h, count: byHour.get(h) ?? 0 });
+  }
+  return result;
 }
 
 const parentPort = process.parentPort;
@@ -100,6 +148,22 @@ parentPort.on('message', (event) => {
         type: 'queryTotalTodayResult',
         requestId: msg.requestId,
         payload: readTodayTotals(),
+      });
+      return;
+    }
+    if (msg.type === 'queryHeatmapDaily') {
+      parentPort.postMessage({
+        type: 'queryHeatmapDailyResult',
+        requestId: msg.requestId,
+        payload: readHeatmapDaily(msg.payload.weeks),
+      });
+      return;
+    }
+    if (msg.type === 'queryHourlyDistribution') {
+      parentPort.postMessage({
+        type: 'queryHourlyDistributionResult',
+        requestId: msg.requestId,
+        payload: readHourlyDistribution(msg.payload.days),
       });
       return;
     }
