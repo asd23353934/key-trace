@@ -33,7 +33,7 @@ await window.waitForFunction(
 );
 
 const screenshotPath = resolve(projectRoot, 'tmp-e2e-screenshot.png');
-await window.screenshot({ path: screenshotPath });
+await window.screenshot({ path: screenshotPath, fullPage: true });
 
 const state = await window.evaluate(() => ({
   title: document.title,
@@ -58,15 +58,15 @@ const ipcTest = await window.evaluate(async () => {
   const cleanup = window.electronTRPC.onMessage((msg) => {
     received.push(msg);
   });
-  for (const op of [
-    { id: 1, type: 'query', path: 'tracker.stats' },
-    { id: 2, type: 'query', path: 'historical.totalToday' },
-    { id: 3, type: 'query', path: 'system.getSettings' },
-  ]) {
-    window.electronTRPC.sendMessage({
-      method: 'request',
-      operation: { ...op, input: undefined },
-    });
+  const ops = [
+    { id: 1, type: 'query', path: 'tracker.stats', input: undefined },
+    { id: 2, type: 'query', path: 'historical.totalToday', input: undefined },
+    { id: 3, type: 'query', path: 'system.getSettings', input: undefined },
+    { id: 4, type: 'query', path: 'historical.heatmapDaily', input: { weeks: 4 } },
+    { id: 5, type: 'query', path: 'historical.hourlyDistribution', input: { days: 1 } },
+  ];
+  for (const op of ops) {
+    window.electronTRPC.sendMessage({ method: 'request', operation: op });
   }
   await new Promise((r) => setTimeout(r, 1500));
   if (typeof cleanup === 'function') cleanup();

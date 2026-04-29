@@ -24,6 +24,12 @@ export function createRouter(
     }),
     historical: t.router({
       totalToday: t.procedure.query(() => storage.queryTotalToday()),
+      heatmapDaily: t.procedure
+        .input(z.object({ weeks: z.number().int().min(1).max(104) }).strict())
+        .query(({ input }) => storage.queryHeatmapDaily(input.weeks)),
+      hourlyDistribution: t.procedure
+        .input(z.object({ days: z.number().int().min(1).max(365) }).strict())
+        .query(({ input }) => storage.queryHourlyDistribution(input.days)),
     }),
     system: t.router({
       getSettings: t.procedure.query(() => systemIntegration.getSettings()),
