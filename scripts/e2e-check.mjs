@@ -6,7 +6,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const projectRoot = resolve(__dirname, '..');
 
 const app = await electron.launch({
-  args: [projectRoot],
+  args: [projectRoot, '--bypass-single-instance'],
   cwd: projectRoot,
 });
 
@@ -52,16 +52,22 @@ const state = await window.evaluate(() => ({
 console.log('STATE:');
 console.log(JSON.stringify(state, null, 2));
 
-// Try direct electronTRPC call to see if main is responding
+// Try direct electronTRPC calls covering all current namespaces
 const ipcTest = await window.evaluate(async () => {
   const received = [];
   const cleanup = window.electronTRPC.onMessage((msg) => {
     received.push(msg);
   });
-  window.electronTRPC.sendMessage({
-    method: 'request',
-    operation: { id: 1, type: 'query', path: 'stats', input: undefined },
-  });
+  for (const op of [
+    { id: 1, type: 'query', path: 'tracker.stats' },
+    { id: 2, type: 'query', path: 'historical.totalToday' },
+    { id: 3, type: 'query', path: 'system.getSettings' },
+  ]) {
+    window.electronTRPC.sendMessage({
+      method: 'request',
+      operation: { ...op, input: undefined },
+    });
+  }
   await new Promise((r) => setTimeout(r, 1500));
   if (typeof cleanup === 'function') cleanup();
   return { received };
